@@ -1,0 +1,40 @@
+name: E2E Frontend (optional)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  e2e-frontend:
+    # Ne s'exécute que si le secret FRONTEND_URL est défini
+    if: ${{ secrets.FRONTEND_URL != '' }}
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ secrets.FRONTEND_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report (on failure)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: frontend/playwright-report
