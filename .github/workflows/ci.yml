@@ -1,11 +1,171 @@
 name: CI
 
 on:
-  push:              # déclenche sur tout push
-  workflow_dispatch: # bouton "Run workflow"
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
 
 jobs:
-  noop:
+  api-tests-mongo:
+    name: API tests (Mongo)
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:6
+        ports: [ "27017:27017" ]
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies (if requirements.txt exists)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f app/backend/requirements.txt ]; then
+            pip install -r app/backend/requirements.txt
+          else
+            echo "No requirements.txt found, skipping installs."
+          fi
+
+      - name: Run Mongo API tests (if present)
+        run: |
+          if [ -f tests/test_api.py ]; then
+            pytest -q tests/test_api.py -s --basetemp=tests_output
+          elif ls tests | grep -E 'test_.*mongo.*\.py' >/dev/null 2>&1; then
+            pytest -q tests/test_*mongo*.py -s --basetemp=tests_output
+          else
+            echo "No Mongo tests found, skipping."
+            mkdir -p tests_output && echo "no mongo tests" > tests_output/NO_MONGO_TESTS.txt
+          fi
+
+      - name: Upload Mongo artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongo-artifacts
+          path: tests_output
+          if-no-files-found: ignore
+
+  api-tests-pgch:
+    name: API tests (Postgres + ClickHouse + MinIO)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pbi_db
+          POSTGRES_USER: pbi_user
+          POSTGRES_PASSWORD: pbi_pass
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd="pg_isready -U pbi_user -d pbi_db"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        ports: [ "9000:9000", "8123:8123" ]
+
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minio
+          MINIO_ROOT_PASSWORD: minio123
+        ports: [ "9000:9000", "9001:9001" ]
+        command: server /data --console-address ":9001"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies (if requirements.txt exists)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f app/backend/requirements.txt ]; then
+            pip install -r app/backend/requirements.txt
+          else
+            echo "No requirements.txt found, skipping installs."
+          fi
+
+      - name: Prepare tests_output folder
+        run: mkdir -p tests_output
+
+      - name: Run PG/CH/MinIO API tests (if present)
+        env:
+          STORAGE_MODE: pgch
+          # DSN/Endpoints for services (container hostnames equal to service IDs)
+          PG_DSN: postgresql+asyncpg://pbi_user:pbi_pass@postgres:5432/pbi_db
+          CH_URL: http://clickhouse:8123
+          CH_USER: default
+          CH_PASS: ""
+          MINIO_ENDPOINT: http://minio:9000
+          MINIO_ACCESS_KEY: minio
+          MINIO_SECRET_KEY: minio123
+          MINIO_BUCKET: aerh-pbi
+        run: |
+          if ls tests | grep -E 'test_api_pgch.*\.py' >/dev/null 2>&1; then
+            pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output
+          else
+            echo "No PGCH tests found, creating placeholder artifacts."
+            echo "no pgch tests" > tests_output/NO_PGCH_TESTS.txt
+          fi
+
+      - name: Upload PGCH artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgch-artifacts
+          path: tests_output
+          if-no-files-found: ignore
+
+  e2e-theme:
+    name: E2E Theme (optional, runs if FRONTEND_URL is set)
+    if: ${{ secrets.FRONTEND_URL != '' }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo "CI installée. Étape OK."
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install Playwright deps
+        run: |
+          if [ -f package-lock.json ] || [ -f package.json ]; then
+            npm ci || npm i
+            npx playwright install --with-deps
+          else
+            echo "No package.json found; skipping."
+          fi
+
+      - name: Run theme E2E (if test file exists)
+        env:
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+        run: |
+          mkdir -p tests_output
+          if [ -f tests/e2e/theme.spec.js ]; then
+            npx playwright test tests/e2e/theme.spec.js
+          else
+            echo "No theme.spec.js found; skipping." > tests_output/NO_E2E_THEME.txt
+          fi
+
+      - name: Upload E2E Theme artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-theme-artifacts
+          path: tests_output
+          if-no-files-found: ignore
+      
