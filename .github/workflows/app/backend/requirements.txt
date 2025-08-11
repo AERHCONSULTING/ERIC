@@ -1,2 +1,5 @@
 fastapi
 uvicorn
+sqlite-utils
+pandas
+pytest
