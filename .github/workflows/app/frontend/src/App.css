@@ -1,0 +1,65 @@
+:root {
+  --bg: #0f1115;
+  --text: #e6e6e6;
+  --muted: #9aa0aa;
+  --surface-1: #161a22;
+  --surface-2: #1b2030;
+  --border: #2a3142;
+  --accent: #5aa9ff;
+  --accent-2: #8bdc8b;
+  --axis: #8892a0;
+}
+:root.light {
+  --bg: #f7f8fb;
+  --text: #1b1f24;
+  --muted: #505968;
+  --surface-1: #ffffff;
+  --surface-2: #f0f2f7;
+  --border: #d9dee9;
+  --accent: #2563eb;
+  --accent-2: #16a34a;
+  --axis: #4b5563;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--surface-1); border-bottom: 1px solid var(--border);
+}
+.header h1 { margin: 0; font-size: 18px; }
+.header .right { display: flex; gap: 12px; align-items: center; }
+
+.app { max-width: 1200px; margin: 0 auto; padding: 12px; }
+
+.panel { padding: 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; margin: 12px 0; }
+.row { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px; }
+.block { display: flex; flex-direction: column; gap: 6px; }
+.label { font-size: 12px; color: var(--muted); }
+
+input, select, .btn {
+  padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text);
+}
+.btn { cursor: pointer; }
+.btn.primary { background: var(--accent); color: white; border-color: transparent; }
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 4px 10px; }
+
+.axis { stroke: var(--axis); stroke-width: 1; }
+.bar { fill: var(--accent); }
+.line { stroke: var(--accent); stroke-width: 2; fill: none; }
+.dot { fill: var(--accent); }
+.pie-slice { fill: var(--accent-2); opacity: 0.9; }
+
+.table { overflow: auto; max-height: 320px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { text-align: left; color: var(--muted); }
+
+.controls { display: flex; gap: 8px; align-items: center; }
