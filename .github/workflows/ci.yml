@@ -26,31 +26,49 @@ jobs:
         options: >-
           --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
           --health-interval=10s --health-timeout=5s --health-retries=5
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Install deps (best-effort)
+
+      - name: Install base test toolchain + optional deps
         run: |
+          set -e
+          python -m pip install -U pip pytest
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           elif [ -f app/backend/requirements.txt ]; then
             pip install -r app/backend/requirements.txt
           else
-            echo "No requirements.txt"
+            echo "No project requirements found (ok for empty repo)."
           fi
-      - name: Run Mongo tests (if present)
+
+      - name: Detect mongo tests
+        id: detect_mongo
+        run: |
+          if [ -d tests ] && (ls tests | grep -E '(^test_api\.py$|mongo)' >/dev/null 2>&1); then
+            echo "has_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Mongo API tests
+        if: steps.detect_mongo.outputs.has_tests == 'true'
         run: |
           mkdir -p tests_output
-          if [ -f tests/test_api.py ]; then
-            pytest -q tests/test_api.py -s --basetemp=tests_output
-          elif ls tests 2>/dev/null | grep -E 'test_.*mongo.*\.py' >/dev/null 2>&1; then
-            pytest -q tests/test_*mongo*.py -s --basetemp=tests_output
-          else
-            echo "No Mongo tests" > tests_output/NO_MONGO_TESTS.txt
-          fi
+          pytest -q tests/test_api.py -s --basetemp=tests_output || \
+          pytest -q tests/test_*mongo*.py -s --basetemp=tests_output
+
+      - name: Produce placeholder when no tests
+        if: steps.detect_mongo.outputs.has_tests != 'true'
+        run: |
+          mkdir -p tests_output
+          echo "No Mongo tests found; skipping." > tests_output/NO_MONGO_TESTS.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: mongo-artifacts
@@ -71,34 +89,53 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U pbi_user -d pbi_db"
           --health-interval=10s --health-timeout=5s --health-retries=5
+
       clickhouse:
         image: clickhouse/clickhouse-server:24.3
         ports: [ "9000:9000", "8123:8123" ]
+
+      # Use Bitnami image which starts MinIO server by default (no 'command:' needed)
       minio:
-        image: minio/minio:latest
+        image: bitnami/minio:latest
         env:
           MINIO_ROOT_USER: minio
           MINIO_ROOT_PASSWORD: minio123
-        ports: [ "9000:9000" ]   # API uniquement
-        # pas de "command:" ici (non supporté par Actions)
+        ports: [ "9000:9000", "9001:9001" ]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Install deps (best-effort)
+
+      - name: Install base test toolchain + optional deps
         run: |
+          set -e
+          python -m pip install -U pip pytest
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           elif [ -f app/backend/requirements.txt ]; then
             pip install -r app/backend/requirements.txt
           else
-            echo "No requirements.txt"
+            echo "No project requirements found (ok for empty repo)."
           fi
+
+      - name: Detect pgch tests
+        id: detect_pgch
+        run: |
+          if [ -d tests ] && (ls tests | grep -E '^test_api_pgch.*\.py$' >/dev/null 2>&1); then
+            echo "has_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Prepare output dir
         run: mkdir -p tests_output
-      - name: Run PG/CH/MinIO tests (if present)
+
+      - name: Run PG/CH/MinIO tests
+        if: steps.detect_pgch.outputs.has_tests == 'true'
         env:
           STORAGE_MODE: pgch
           PG_DSN: postgresql+asyncpg://pbi_user:pbi_pass@postgres:5432/pbi_db
@@ -110,11 +147,13 @@ jobs:
           MINIO_SECRET_KEY: minio123
           MINIO_BUCKET: aerh-pbi
         run: |
-          if ls tests 2>/dev/null | grep -E 'test_api_pgch.*\.py' >/dev/null 2>&1; then
-            pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output
-          else
-            echo "No PGCH tests" > tests_output/NO_PGCH_TESTS.txt
-          fi
+          pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output
+
+      - name: Produce placeholder when no tests
+        if: steps.detect_pgch.outputs.has_tests != 'true'
+        run: |
+          echo "No PGCH tests found; skipping." > tests_output/NO_PGCH_TESTS.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: pgch-artifacts
@@ -125,12 +164,11 @@ jobs:
     name: E2E Theme (optional)
     runs-on: ubuntu-latest
     env:
-      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}   # injection du secret en env
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
     steps:
       - name: Skip if FRONTEND_URL not set
         if: env.FRONTEND_URL == ''
-        run: |
-          echo "FRONTEND_URL not set; skipping E2E theme job."
+        run: echo "FRONTEND_URL not set; skipping E2E theme job."
       - uses: actions/checkout@v4
         if: env.FRONTEND_URL != ''
       - uses: actions/setup-node@v4
