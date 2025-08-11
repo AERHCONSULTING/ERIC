@@ -166,6 +166,49 @@ jobs:
   # -------------- Job 4: E2E Frontend (optionnel) --------------
   e2e-frontend:
     name: E2E Frontend (optional)
+    runs-on: ubuntu-latest
+    env:
+      # On dérive FRONTEND_URL depuis le secret (string vide si absent)
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL || '' }}
+      BASE_URL: ${{ secrets.FRONTEND_URL || '' }}
+
+    steps:
+      - name: Skip if FRONTEND_URL not set
+        if: ${{ env.FRONTEND_URL == '' }}
+        run: echo "FRONTEND_URL not set; skipping E2E frontend job."
+
+      - uses: actions/checkout@v4
+        if: ${{ env.FRONTEND_URL != '' }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ env.FRONTEND_URL != '' }}
+        with:
+          node-version: '18'
+
+      - name: Install deps
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report (on failure)
+        if: ${{ env.FRONTEND_URL != '' && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: frontend/playwright-report
+  # -------------- Job 4: E2E Frontend (optionnel) --------------
+  e2e-frontend:
+    name: E2E Frontend (optional)
     if: ${{ secrets.FRONTEND_URL != '' }}
     runs-on: ubuntu-latest
     env:
