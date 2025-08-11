@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  api-tests-mongo:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:5
+        ports: [ "27017:27017" ]
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - run: pytest -q tests/test_api.py -s --basetemp=tests_output
+      - name: Upload Mongo Artifacts
+        uses: actions/upload-artifact@v4
+        with: { name: mongo-artifacts, path: tests_output }
+
+  api-tests-pgch:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pbi_db
+          POSTGRES_USER: pbi_user
+          POSTGRES_PASSWORD: pbi_pass
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd="pg_isready -U pbi_user -d pbi_db"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        ports: [ "9000:9000", "8123:8123" ]
+      minio:
+        image: minio/minio
+        env:
+          MINIO_ACCESS_KEY: minio
+          MINIO_SECRET_KEY: minio123
+        ports: [ "9001:9000" ]
+        command: server /data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - run: pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output
+      - name: Upload PGCH Artifacts
+        uses: actions/upload-artifact@v4
+        with: { name: pgch-artifacts, path: tests_output }
+
+  e2e-theme:
+    if: ${{ secrets.FRONTEND_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '18' }
+      - run: npm ci
+      - run: npx playwright install --with-deps
+      - run: FRONTEND_URL=${{ secrets.FRONTEND_URL }} npx playwright test tests/e2e/theme.spec.js
+      - name: Upload E2E Theme Artifacts
+        uses: actions/upload-artifact@v4
+        with: { name: e2e-theme-artifacts, path: tests_output }
+chore(ci): add GitHub Actions workflow
