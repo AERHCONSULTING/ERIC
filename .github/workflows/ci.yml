@@ -73,6 +73,7 @@ jobs:
         options: >-
           --health-cmd="pg_isready -U pbi_user -d pbi_db"
           --health-interval=10s --health-timeout=5s --health-retries=5
+
       clickhouse:
         image: clickhouse/clickhouse-server:24.3
         ports: [ "9000:9000", "8123:8123" ]
@@ -121,18 +122,22 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+
     steps:
       - name: Skip if FRONTEND_URL not set
-        if: env.FRONTEND_URL == ''
+        if: ${{ env.FRONTEND_URL == '' }}
         run: echo "FRONTEND_URL not set; skipping E2E theme job."
+
       - uses: actions/checkout@v4
-        if: env.FRONTEND_URL != ''
+        if: ${{ env.FRONTEND_URL != '' }}
+
       - uses: actions/setup-node@v4
-        if: env.FRONTEND_URL != ''
+        if: ${{ env.FRONTEND_URL != '' }}
         with:
           node-version: "18"
+
       - name: Install Playwright deps (if package.json exists)
-        if: env.FRONTEND_URL != ''
+        if: ${{ env.FRONTEND_URL != '' }}
         run: |
           if [ -f package-lock.json ] || [ -f package.json ]; then
             npm ci || npm i
@@ -140,6 +145,7 @@ jobs:
           else
             echo "No package.json, skipping"
           fi
+
       - name: Run theme E2E (if test file exists)
         if: ${{ env.FRONTEND_URL != '' }}
         run: |
@@ -157,18 +163,20 @@ jobs:
           path: tests_output
           if-no-files-found: ignore
 
+  # -------------- Job 4: E2E Frontend (optionnel) --------------
   e2e-frontend:
     name: E2E Frontend (optional)
     if: ${{ secrets.FRONTEND_URL != '' }}
     runs-on: ubuntu-latest
     env:
       BASE_URL: ${{ secrets.FRONTEND_URL }}
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-         node-version: '18'
+          node-version: '18'
 
       - name: Install deps
         working-directory: frontend
@@ -183,8 +191,8 @@ jobs:
         run: npm run test:e2e
 
       - name: Upload Playwright report (on failure)
-        if: ${{ failure() }}   # ✅ corrigé
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-         name: e2e-report
-         path: frontend/playwright-report
+          name: e2e-report
+          path: frontend/playwright-report
