@@ -141,7 +141,7 @@ jobs:
             echo "No package.json, skipping"
           fi
       - name: Run theme E2E (if test file exists)
-        if: env.FRONTEND_URL != ''
+        if: ${{ env.FRONTEND_URL != '' }}
         run: |
           mkdir -p tests_output
           if [ -f tests/e2e/theme.spec.js ]; then
@@ -149,8 +149,9 @@ jobs:
           else
             echo "No theme.spec.js" > tests_output/NO_E2E_THEME.txt
           fi
+
       - uses: actions/upload-artifact@v4
-        if: env.FRONTEND_URL != ''
+        if: ${{ env.FRONTEND_URL != '' }}
         with:
           name: e2e-theme-artifacts
           path: tests_output
