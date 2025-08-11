@@ -34,7 +34,6 @@ jobs:
           cache: pip
       - name: Install deps (best-effort)
         run: |
-          set -e
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           elif [ -f app/backend/requirements.txt ]; then
@@ -80,9 +79,9 @@ jobs:
         env:
           MINIO_ROOT_USER: minio
           MINIO_ROOT_PASSWORD: minio123
-        ports: [ "9000:9000", "9001:9001" ]
-        # IMPORTANT: must be exactly "command:", not translated
-        command: server /data --console-address ":9001"
+        ports: [ "9000:9000" ]   # API
+        # pas de 'command:' ici (non supporté par Actions)
+        # le serveur démarre par défaut avec 'server /data'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,7 +90,6 @@ jobs:
           cache: pip
       - name: Install deps (best-effort)
         run: |
-          set -e
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           elif [ -f app/backend/requirements.txt ]; then
@@ -113,7 +111,6 @@ jobs:
           MINIO_SECRET_KEY: minio123
           MINIO_BUCKET: aerh-pbi
         run: |
-          set -e
           if ls tests 2>/dev/null | grep -E 'test_api_pgch.*\.py' >/dev/null 2>&1; then
             pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output
           else
@@ -127,8 +124,7 @@ jobs:
 
   e2e-theme:
     name: E2E Theme (optional)
-    # DO NOT translate 'secrets' and keep the ${{ }} exactly
-    if: ${{ secrets.FRONTEND_URL != '' }}
+    if: ${{ secrets.FRONTEND_URL && secrets.FRONTEND_URL != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,7 +134,6 @@ jobs:
           cache: npm
       - name: Install Playwright deps (if package.json exists)
         run: |
-          set -e
           if [ -f package-lock.json ] || [ -f package.json ]; then
             npm ci || npm i
             npx playwright install --with-deps
@@ -149,7 +144,6 @@ jobs:
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
         run: |
-          set -e
           mkdir -p tests_output
           if [ -f tests/e2e/theme.spec.js ]; then
             npx playwright test tests/e2e/theme.spec.js
