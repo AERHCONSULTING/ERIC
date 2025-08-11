@@ -1,0 +1,11 @@
+name: CI
+
+on:
+  push:              # déclenche sur tout push
+  workflow_dispatch: # bouton "Run workflow"
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI installée. Étape OK."
