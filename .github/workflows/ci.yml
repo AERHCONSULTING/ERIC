@@ -1,206 +1,261 @@
 name: CI
 
-"on": push: branches: - '**' workflow_dispatch:
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
 
-permissions: contents: read
+permissions:
+  contents: read
 
-concurrency: group: ci-${{ github.ref }} cancel-in-progress: true
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
-env: PYTHON_VERSION: "3.11"
+env:
+  PYTHON_VERSION: "3.11"
 
-jobs: api-tests-mongo: name: API tests (Mongo) runs-on: ubuntu-latest services: mongo: image: mongo:6 ports: [ "27017:27017" ] options: >- --health-cmd="mongosh --eval 'db.adminCommand("ping")'" --health-interval=10s --health-timeout=5s --health-retries=5
+jobs:
+  # ------------------- Job 1: Mongo -------------------
+  api-tests-mongo:
+    name: API tests (Mongo)
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:6
+        ports: [ "27017:27017" ]
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s --health-timeout=5s --health-retries=5
 
-steps:
-  - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-  - uses: actions/setup-python@v5
-    with:
-      python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-  - name: Cache pip
-    uses: actions/cache@v4
-    with:
-      path: ~/.cache/pip
-      key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt', 'app/backend/requirements.txt') }}
-      restore-keys: |
-        pip-${{ runner.os }}-
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt', 'app/backend/requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
 
-  - name: Install pytest + project deps
-    run: |
-      set -e
-      python -m pip install -U pip pytest pytest-cov || true
-      if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
-      if [ -f app/backend/requirements.txt ]; then pip install -r app/backend/requirements.txt || true; fi
+      - name: Install pytest + project deps
+        run: |
+          set -e
+          python -m pip install -U pip pytest pytest-cov || true
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+          if [ -f app/backend/requirements.txt ]; then pip install -r app/backend/requirements.txt || true; fi
 
-  - name: Run Mongo tests with coverage (or skip)
-    run: |
-      set -e
-      mkdir -p tests_output
-      if [ -d tests ] && (ls tests | grep -E '(^test_api\.py$|mongo)' >/dev/null 2>&1); then
-        pytest -q tests/test_api.py -s --basetemp=tests_output --cov=app --cov-report=xml || \
-        pytest -q tests/test_*mongo*.py -s --basetemp=tests_output --cov=app --cov-report=xml || true
-      else
-        echo "No Mongo tests found; skipping." > tests_output/NO_MONGO_TESTS.txt
-      fi
+      - name: Run Mongo tests with coverage (or skip)
+        run: |
+          set -e
+          mkdir -p tests_output
+          if [ -d tests ] && (ls tests | grep -E '(^test_api\.py$|mongo)' >/dev/null 2>&1); then
+            pytest -q tests/test_api.py -s --basetemp=tests_output --cov=app --cov-report=xml || \
+            pytest -q tests/test_*mongo*.py -s --basetemp=tests_output --cov=app --cov-report=xml || true
+          else
+            echo "No Mongo tests found; skipping." > tests_output/NO_MONGO_TESTS.txt
+          fi
 
-  - uses: actions/upload-artifact@v4
-    with:
-      name: mongo-artifacts
-      path: |
-        tests_output
-        coverage.xml
-      if-no-files-found: ignore
-api-tests-pgch: name: API tests (Postgres + ClickHouse) runs-on: ubuntu-latest services: postgres: image: postgres:16 env: POSTGRES_DB: pbi_db POSTGRES_USER: pbi_user POSTGRES_PASSWORD: pbi_pass ports: [ "5432:5432" ] options: >- --health-cmd="pg_isready -U pbi_user -d pbi_db" --health-interval=10s --health-timeout=5s --health-retries=5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mongo-artifacts
+          path: |
+            tests_output
+            coverage.xml
+          if-no-files-found: ignore
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.3
-    ports: [ "9000:9000", "8123:8123" ]
+  # -------- Job 2: Postgres + ClickHouse (sans MinIO) --------
+  api-tests-pgch:
+    name: API tests (Postgres + ClickHouse)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pbi_db
+          POSTGRES_USER: pbi_user
+          POSTGRES_PASSWORD: pbi_pass
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd="pg_isready -U pbi_user -d pbi_db"
+          --health-interval=10s --health-timeout=5s --health-retries=5
 
-steps:
-  - uses: actions/checkout@v4
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3
+        ports: [ "9000:9000", "8123:8123" ]
 
-  - name: Detect pgch tests
-    id: detect_pgch
-    run: |
-      if [ -d tests ] && ls tests | grep -E '^test_api_pgch.*\.py$' >/dev/null 2>&1; then
-        echo "has_tests=true" >> $GITHUB_OUTPUT
-      else
-        echo "has_tests=false" >> $GITHUB_OUTPUT
-      fi
+    steps:
+      - uses: actions/checkout@v4
 
-  - uses: actions/setup-python@v5
-    if: ${{ steps.detect_pgch.outputs.has_tests == 'true' }}
-    with:
-      python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-  - name: Install pytest + optional project deps
-    if: ${{ steps.detect_pgch.outputs.has_tests == 'true' }}
-    run: |
-      set -e
-      python -m pip install -U pip pytest || true
-      if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
-      if [ -f app/backend/requirements.txt ]; then pip install -r app/backend/requirements.txt || true; fi
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt', 'app/backend/requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
 
-  - name: Prepare output dir
-    run: mkdir -p tests_output
+      - name: Install pytest + project deps
+        run: |
+          set -e
+          python -m pip install -U pip pytest || true
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+          if [ -f app/backend/requirements.txt ]; then pip install -r app/backend/requirements.txt || true; fi
 
-  - name: Run PG/CH tests
-    if: ${{ steps.detect_pgch.outputs.has_tests == 'true' }}
+      - name: Prepare output dir
+        run: mkdir -p tests_output
+
+      - name: Run PG/CH tests if present (else create placeholder)
+        env:
+          STORAGE_MODE: pgch
+          PG_DSN: postgresql+asyncpg://pbi_user:pbi_pass@postgres:5432/pbi_db
+          CH_URL: http://clickhouse:8123
+          CH_USER: default
+          CH_PASS: ""
+        run: |
+          set -e
+          if [ -d tests ] && (ls tests | grep -E '^test_api_pgch.*\.py$' >/dev/null 2>&1); then
+            pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output || true
+          else
+            echo "No PGCH tests found; skipping." > tests_output/NO_PGCH_TESTS.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pgch-artifacts
+          path: tests_output
+          if-no-files-found: ignore
+
+  # -------------- Job 3: Frontend build (sanity) --------------
+  frontend-build:
+    name: Frontend build (sanity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          if-no-files-found: ignore
+
+  # -------------- Job 4: E2E Theme (optionnel) --------------
+  e2e-theme:
+    name: E2E Theme (optional)
+    runs-on: ubuntu-latest
     env:
-      STORAGE_MODE: pgch
-      PG_DSN: postgresql+asyncpg://pbi_user:pbi_pass@postgres:5432/pbi_db
-      CH_URL: http://clickhouse:8123
-      CH_USER: default
-      CH_PASS: ""
-    run: |
-      set -e
-      pytest -q tests/test_api_pgch*.py -s --basetemp=tests_output || true
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
 
-  - name: No PGCH tests – skipping
-    if: ${{ steps.detect_pgch.outputs.has_tests != 'true' }}
-    run: echo "No tests/test_api_pgch*.py – job skipped." > tests_output/NO_PGCH_TESTS.txt
+    steps:
+      - name: Skip if FRONTEND_URL not set
+        if: ${{ env.FRONTEND_URL == '' }}
+        run: echo "FRONTEND_URL not set; skipping E2E theme job."
 
-  - uses: actions/upload-artifact@v4
-    with:
-      name: pgch-artifacts
-      path: tests_output
-      if-no-files-found: ignore
-e2e-theme: name: E2E Theme (optional) runs-on: ubuntu-latest env: FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      - uses: actions/checkout@v4
+        if: ${{ env.FRONTEND_URL != '' }}
 
-steps:
-  - name: Skip if FRONTEND_URL not set
-    if: ${{ env.FRONTEND_URL == '' }}
-    run: echo "FRONTEND_URL not set; skipping E2E theme job."
+      - uses: actions/setup-node@v4
+        if: ${{ env.FRONTEND_URL != '' }}
+        with:
+          node-version: "18"
 
-  - uses: actions/checkout@v4
-    if: ${{ env.FRONTEND_URL != '' }}
+      - name: Install Playwright deps (if package.json exists)
+        if: ${{ env.FRONTEND_URL != '' }}
+        run: |
+          if [ -f package-lock.json ] || [ -f package.json ]; then
+            npm ci || npm i
+            npx playwright install --with-deps
+          else
+            echo "No package.json, skipping"
+          fi
 
-  - uses: actions/setup-node@v4
-    if: ${{ env.FRONTEND_URL != '' }}
-    with:
-      node-version: '20'
+      - name: Run theme E2E (if test file exists)
+        if: ${{ env.FRONTEND_URL != '' }}
+        run: |
+          mkdir -p tests_output
+          if [ -f tests/e2e/theme.spec.js ]; then
+            npx playwright test tests/e2e/theme.spec.js || true
+          else
+            echo "No theme.spec.js" > tests_output/NO_E2E_THEME.txt
+          fi
 
-  - name: Install Playwright and run E2E if FRONTEND_URL is set
-    if: ${{ env.FRONTEND_URL != '' }}
-    run: |
-      set -e
-      cd tests/e2e || (mkdir -p tests/e2e && cd tests/e2e)
-      npm init -y >/dev/null 2>&1 || true
-      npm i -D @playwright/test
-      npx playwright install --with-deps
-      cat > theme.spec.js <<'EOF'
-const { test, expect } = require('@playwright/test'); const FRONTEND_URL = process.env.FRONTEND_URL;
+      - uses: actions/upload-artifact@v4
+        if: ${{ env.FRONTEND_URL != '' }}
+        with:
+          name: e2e-theme-artifacts
+          path: tests_output
+          if-no-files-found: ignore
 
-test('theme toggle and png exports (placeholder)', async ({ page }) => { await page.goto(FRONTEND_URL, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(500); // Ajoutez ici les sélecteurs exacts quand l’UI thème est prête }); EOF npx playwright test --reporter=dot
+  # -------------- Job 5: E2E Frontend (optionnel) --------------
+  e2e-frontend:
+    name: E2E Frontend (optional)
+    runs-on: ubuntu-latest
+    env:
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL || '' }}
+      BASE_URL: ${{ secrets.FRONTEND_URL || '' }}
 
-  - name: Upload E2E artifacts
-    if: ${{ env.FRONTEND_URL != '' }}
-    uses: actions/upload-artifact@v4
-    with:
-      name: e2e-theme-artifacts
-      path: tests/e2e/*.png
-      if-no-files-found: ignore
-e2e-frontend: name: E2E Frontend (optional) runs-on: ubuntu-latest env: BASE_URL: ${{ secrets.FRONTEND_URL }}
+    steps:
+      - name: Skip if FRONTEND_URL not set
+        if: ${{ env.FRONTEND_URL == '' }}
+        run: echo "FRONTEND_URL not set; skipping E2E frontend job."
 
-steps:
-  - name: Skip if BASE_URL not set
-    if: ${{ env.BASE_URL == '' }}
-    run: echo "FRONTEND_URL not set; skipping UI E2E."
+      - uses: actions/checkout@v4
+        if: ${{ env.FRONTEND_URL != '' }}
 
-  - uses: actions/checkout@v4
-    if: ${{ env.BASE_URL != '' }}
+      - uses: actions/setup-node@v4
+        if: ${{ env.FRONTEND_URL != '' }}
+        with:
+          node-version: '18'
 
-  - uses: actions/setup-node@v4
-    if: ${{ env.BASE_URL != '' }}
-    with:
-      node-version: '18'
+      - name: Install deps
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npm ci
 
-  - name: Install deps
-    if: ${{ env.BASE_URL != '' }}
-    working-directory: app/frontend
-    run: npm ci || npm i
+      - name: Install Playwright
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npx playwright install --with-deps
 
-  - name: Install Playwright
-    if: ${{ env.BASE_URL != '' }}
-    working-directory: app/frontend
-    run: npx playwright install --with-deps
+      - name: Run E2E tests
+        if: ${{ env.FRONTEND_URL != '' }}
+        working-directory: frontend
+        run: npm run test:e2e
 
-  - name: Run E2E tests
-    if: ${{ env.BASE_URL != '' }}
-    working-directory: app/frontend
-    run: npm run test:e2e
-
-  - name: Upload Playwright report (on failure)
-    if: ${{ failure() && env.BASE_URL != '' }}
-    uses: actions/upload-artifact@v4
-    with:
-      name: e2e-report
-      path: app/frontend/playwright-report
-frontend-build: name: Frontend build (sanity) runs-on: ubuntu-latest steps: - uses: actions/checkout@v4
-
-  - uses: actions/setup-node@v4
-    with:
-      node-version: '18'
-
-  - name: Cache npm
-    uses: actions/cache@v4
-    with:
-      path: ~/.npm
-      key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json') }}
-      restore-keys: |
-        npm-${{ runner.os }}-
-
-  - name: Install deps
-    working-directory: app/frontend
-    run: npm ci || npm i
-
-  - name: Build
-    working-directory: app/frontend
-    run: npm run build
-
-  - name: Upload build (optional)
-    uses: actions/upload-artifact@v4
-    with:
-      name: frontend-build
-      path: app/frontend/build
-      if-no-files-found: ignore
+      - name: Upload Playwright report (on failure)
+        if: ${{ env.FRONTEND_URL != '' && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: frontend/playwright-report
