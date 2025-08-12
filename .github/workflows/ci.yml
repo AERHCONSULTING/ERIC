@@ -137,37 +137,64 @@ jobs:
           if-no-files-found: ignore
 
   # -------------- Job 3: Frontend build (sanity) --------------
-  frontend-build:
+    frontend-build:
     name: Frontend build (sanity)
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
+      # 🔎 Détecte automatiquement où se trouve le frontend
+      - name: Detect frontend directory
+        id: detect
+        shell: bash
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "dir=frontend" >> "$GITHUB_OUTPUT"
+          elif [ -f app/frontend/package.json ]; then
+            echo "dir=app/frontend" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Detected dir: $(cat $GITHUB_OUTPUT || true)"
+      
+      # 🟡 Si aucun frontend n'est trouvé, on skip proprement
+      - name: Skip (no frontend found)
+        if: ${{ steps.detect.outputs.dir == '' }}
+        run: echo "No frontend directory found (frontend/ or app/frontend/). Skipping build."
+
+      # ⬇️ Les étapes suivantes ne s’exécutent que si un front a été détecté
       - uses: actions/setup-node@v4
+        if: ${{ steps.detect.outputs.dir != '' }}
         with:
           node-version: '18'
 
       - name: Cache npm
+        if: ${{ steps.detect.outputs.dir != '' }}
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json') }}
+          # Clé de cache robuste (peut matcher l’un ou l’autre chemin)
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json', 'app/frontend/package-lock.json', 'app/frontend/package.json') }}
           restore-keys: |
             npm-${{ runner.os }}-
 
       - name: Install deps
-        working-directory: frontend
+        if: ${{ steps.detect.outputs.dir != '' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
         run: npm ci
 
       - name: Build
-        working-directory: frontend
+        if: ${{ steps.detect.outputs.dir != '' }}
+        working-directory: ${{ steps.detect.outputs.dir }}
         run: npm run build
 
       - name: Upload build (optional)
+        if: ${{ steps.detect.outputs.dir != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build
-          path: frontend/build
+          path: ${{ steps.detect.outputs.dir }}/build
           if-no-files-found: ignore
 
   # -------------- Job 4: E2E Theme (optionnel) --------------
