@@ -21,3 +21,4 @@ clickhouse-connect==0.7.19
 
 # MinIO
 minio==7.2.9
+pytest-cov==4.1.0
