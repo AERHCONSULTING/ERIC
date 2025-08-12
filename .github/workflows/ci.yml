@@ -36,20 +36,28 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install pytest + optional project deps
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt', 'app/backend/requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install pytest + project deps
         run: |
           set -e
-          python -m pip install -U pip pytest || true
+          python -m pip install -U pip pytest pytest-cov || true
           if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
           if [ -f app/backend/requirements.txt ]; then pip install -r app/backend/requirements.txt || true; fi
 
-      - name: Run Mongo tests if present (else create placeholder)
+      - name: Run Mongo tests with coverage (or skip)
         run: |
           set -e
           mkdir -p tests_output
           if [ -d tests ] && (ls tests | grep -E '(^test_api\.py$|mongo)' >/dev/null 2>&1); then
-            ( pytest -q tests/test_api.py -s --basetemp=tests_output ) || \
-            ( pytest -q tests/test_*mongo*.py -s --basetemp=tests_output ) || true
+            pytest -q tests/test_api.py -s --basetemp=tests_output --cov=app --cov-report=xml || \
+            pytest -q tests/test_*mongo*.py -s --basetemp=tests_output --cov=app --cov-report=xml || true
           else
             echo "No Mongo tests found; skipping." > tests_output/NO_MONGO_TESTS.txt
           fi
@@ -57,7 +65,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mongo-artifacts
-          path: tests_output
+          path: |
+            tests_output
+            coverage.xml
           if-no-files-found: ignore
 
   # -------- Job 2: Postgres + ClickHouse (sans MinIO) --------
@@ -87,7 +97,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install pytest + optional project deps
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements.txt', 'app/backend/requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install pytest + project deps
         run: |
           set -e
           python -m pip install -U pip pytest || true
@@ -118,7 +136,41 @@ jobs:
           path: tests_output
           if-no-files-found: ignore
 
-  # -------------- Job 3: E2E Theme (optionnel) --------------
+  # -------------- Job 3: Frontend build (sanity) --------------
+  frontend-build:
+    name: Frontend build (sanity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          if-no-files-found: ignore
+
+  # -------------- Job 4: E2E Theme (optionnel) --------------
   e2e-theme:
     name: E2E Theme (optional)
     runs-on: ubuntu-latest
@@ -165,7 +217,7 @@ jobs:
           path: tests_output
           if-no-files-found: ignore
 
-  # -------------- Job 4: E2E Frontend (optionnel) --------------
+  # -------------- Job 5: E2E Frontend (optionnel) --------------
   e2e-frontend:
     name: E2E Frontend (optional)
     runs-on: ubuntu-latest
